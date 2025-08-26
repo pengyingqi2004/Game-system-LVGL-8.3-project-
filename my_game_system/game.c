@@ -68,12 +68,19 @@ M_pg_P Main_page(struct UI_Contral * UC_P)
     
     //游戏列表与游戏显示
     UC_P->Main_page->main_list=lv_list_create(UC_P->Main_page->main_ui);
+    lv_obj_set_size(UC_P->Main_page->main_list,200,450);
+    lv_obj_set_pos(UC_P->Main_page->main_list,10,10);
     UC_P->Main_page->main_game=lv_obj_create(UC_P->Main_page->main_ui);
+    lv_obj_set_size(UC_P->Main_page->main_game,570,450);
+    lv_obj_set_pos(UC_P->Main_page->main_game,220,10);
+
     //-----------------0
 
     UC_P->Main_page->exit_bottom=lv_btn_create(UC_P->Main_page->main_ui);
     lv_obj_set_size(UC_P->Main_page->exit_bottom,70,30);
     lv_obj_set_pos(UC_P->Main_page->exit_bottom,720,10);
+
+
     UC_P->Main_page->exit_lab=lv_label_create(UC_P->Main_page->exit_bottom);
     lv_label_set_recolor(UC_P->Main_page->exit_lab,1);
     lv_obj_center(UC_P->Main_page->exit_lab);
