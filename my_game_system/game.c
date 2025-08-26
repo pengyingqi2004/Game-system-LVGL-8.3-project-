@@ -55,12 +55,15 @@ void Enter_Main_page(lv_event_t * e)
 
 M_pg_P Main_page(struct UI_Contral * UC_P)
 {
+    //创建堆空间
     UC_P->Main_page = malloc(sizeof(struct Main_page));
     if(UC_P->Main_page == NULL) {
         perror("malloc main_page ");
         return NULL;
     }
     memset(UC_P->Main_page, 0, sizeof(struct Main_page));
+
+    //创建主界面与背景
     UC_P->Main_page->main_ui=lv_obj_create(NULL);
     UC_P->Main_page->backgound=lv_img_create(UC_P->Main_page->main_ui);
     lv_img_set_src(UC_P->Main_page->backgound,"S:/1.jpg");
@@ -76,11 +79,14 @@ M_pg_P Main_page(struct UI_Contral * UC_P)
 
     //-----------------0
 
+    //退出按钮
     UC_P->Main_page->exit_bottom=lv_btn_create(UC_P->Main_page->main_ui);
     lv_obj_set_size(UC_P->Main_page->exit_bottom,70,30);
     lv_obj_set_pos(UC_P->Main_page->exit_bottom,720,10);
+    lv_obj_add_event_cb(UC_P->Main_page->exit_bottom,Exit_page,LV_EVENT_CHILD_CHANGED,UC_P);//
 
 
+    //退出文字
     UC_P->Main_page->exit_lab=lv_label_create(UC_P->Main_page->exit_bottom);
     lv_label_set_recolor(UC_P->Main_page->exit_lab,1);
     lv_obj_center(UC_P->Main_page->exit_lab);
