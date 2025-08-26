@@ -45,6 +45,7 @@ typedef struct Main_page
 
 typedef struct End_page
 {
+    lv_obj_t * end_ui;
     lv_obj_t * backgound;
     lv_obj_t * end_lab;
 }ED,*ED_P;

@@ -94,3 +94,25 @@ M_pg_P Main_page(struct UI_Contral * UC_P)
 
     return UC_P->Main_page;
 }
+
+void Exit_page(lv_event_t * e)
+{
+    struct UI_Contral * UC_P=(struct UI_Contral *)e->user_data;
+    UC_P->End_page=End_page(UC_P);
+    lv_scr_load_anim(UC_P->End_page->end_ui,LV_SCR_LOAD_ANIM_FADE_ON,500,0,true);
+    free(UC_P->Main_page);
+    UC_P->Main_page=NULL;
+    return ;
+}
+
+ED_P End_page(struct UI_Contral * UC_P)
+{
+    UC_P->End_page->end_ui=lv_obj_create(NULL);
+    UC_P->End_page->backgound=lv_img_create(UC_P->End_page->end_ui);
+    lv_img_set_src(UC_P->End_page->backgound,"S:/1.jpg");
+    lv_obj_center(UC_P->End_page->backgound);
+    UC_P->End_page->end_lab=lv_label_create(UC_P->End_page->end_ui);
+    
+
+
+}
