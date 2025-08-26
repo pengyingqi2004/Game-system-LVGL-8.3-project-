@@ -1,0 +1,13 @@
+{
+    "cmake.ignoreCMakeListsMissing": true,
+    "files.associations": {
+        "dir_look.h": "c",
+        "time.h": "c",
+        "fbdev.h": "c",
+        "main_page.h": "c",
+        "pthread.h": "c",
+        "stdio.h": "c",
+        "dirent.h": "c",
+        "lvgl.h": "c"
+    }
+}
