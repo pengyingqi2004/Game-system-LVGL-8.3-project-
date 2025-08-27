@@ -21,8 +21,8 @@
 #include <dirent.h>
 
 #include "2048.h"
-#include "memory.h"
 #include "memory_game.h"
+#include "snake.h"
 
 #include "../lv_lib_100ask-release-v8.x/lv_lib_100ask.h"
 #include "../lv_lib_100ask_conf.h"
@@ -77,6 +77,9 @@ static void lv_100ask_memory_game_destructor(const lv_obj_class_t * class_p, lv_
 static void lv_100ask_memory_game_event(const lv_obj_class_t * class_p, lv_event_t * e);
 static void list_rand_number(uint16_t arry[], uint16_t max_count, uint16_t count);
 static void item_event_handler(lv_event_t * e);
+static void Snake_game(struct UI_Contral * UC_P)
+
+
 //结构体定义区
 typedef struct Game_Mode
 {
@@ -128,6 +131,7 @@ struct UI_Contral
     GP_P   Game_page;
 
 };
+
 
 const lv_obj_class_t lv_100ask_2048_class = {
     .constructor_cb = lv_100ask_2048_constructor,

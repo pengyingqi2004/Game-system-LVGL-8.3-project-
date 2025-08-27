@@ -124,7 +124,6 @@ void Exit_page(lv_event_t * e)
 }
 //——————————————————————————————————————————————————————————————————————————————————————
 
-
 //退出界面
 ED_P End_page(struct UI_Contral * UC_P)
 {
@@ -211,6 +210,16 @@ bool Game_Show(struct UI_Contral * UC_P)
     lv_label_set_text(game_memory_lab,"memory game");
     lv_obj_add_event_cb(game_memory, game_memory_btn_event_handler, LV_EVENT_SHORT_CLICKED, UC_P);
     return true;
+
+    btn_x+=100;
+    lv_obj_t * game_snake=lv_btn_create(UC_P->Main_page->main_game);
+    lv_obj_set_size(game_snake,game_btn_x,game_btn_x);
+    lv_obj_set_pos(game_snake,btn_x,btn_y);
+    lv_obj_t * game_snake_lab = lv_label_create(UC_P->Main_page->main_game);
+    lv_obj_set_pos(game_snake_lab,105,110);
+    lv_label_set_text(game_snake_lab,"memory game");
+    lv_obj_add_event_cb(game_snake, game_snake_btn_event_handler, LV_EVENT_SHORT_CLICKED, UC_P);
+    return true;
 }
 //——————————————————————————————————————————————————————————————————————————————————————
 
@@ -258,6 +267,8 @@ GP_P Game_page(struct UI_Contral * UC_P)
     return UC_P->Game_page;
 
 }
+//——————————————————————————————————————————————————————————————————————————————————————
+
 
 //返回主界面
 void Return_page(lv_event_t * e)
@@ -270,6 +281,7 @@ void Return_page(lv_event_t * e)
     UC_P->Game_page=NULL;
     return ;
 }
+//——————————————————————————————————————————————————————————————————————————————————————
 
 // 适配 LVGL 事件的回调：把 lv_event_t* 转给 Game_Show(UC_P)
 static void Game_Show_cb(lv_event_t * e)
@@ -285,6 +297,7 @@ static void Game_Show_cb(lv_event_t * e)
     // 调用你原本的业务函数，不改它的签名
     Game_Show(UC_P);
 }
+//——————————————————————————————————————————————————————————————————————————————————————
 
 //创建函数调用——清除主界面（释放空间，来保证不怎么卡），转到2048
 static void game_2048_btn_event_handler(lv_event_t * e)
@@ -299,6 +312,7 @@ static void game_2048_btn_event_handler(lv_event_t * e)
     lv_timer_set_repeat_count(t, 1);
 
 }
+//——————————————————————————————————————————————————————————————————————————————————————
 
 /*用延迟等待 Game_ui 之后再创建 2048 */
 static void start_2048_cb(lv_timer_t * timer)
@@ -308,6 +322,7 @@ static void start_2048_cb(lv_timer_t * timer)
     lv_100ask_2048_simple_test();
     lv_timer_del(timer);
 }
+//——————————————————————————————————————————————————————————————————————————————————————
 
 //创建函数调用——清除主界面（释放空间，来保证不怎么卡），转到记忆游戏
 static void game_memory_btn_event_handler(lv_event_t * e)
@@ -322,6 +337,7 @@ static void game_memory_btn_event_handler(lv_event_t * e)
     lv_timer_set_repeat_count(t, 1);
 
 }
+//——————————————————————————————————————————————————————————————————————————————————————
 
 /*用延迟等待 Game_ui 之后再创建 记忆游戏 */
 static void start_memory_cb(lv_timer_t * timer)
@@ -331,7 +347,27 @@ static void start_memory_cb(lv_timer_t * timer)
     lv_100ask_memory_game_simple_test();
     lv_timer_del(timer);
 }
+//——————————————————————————————————————————————————————————————————————————————————————
+//创建函数调用——清除主界面（释放空间，来保证不怎么卡），转到贪吃蛇
+static void game_snake_btn_event_handler(lv_event_t * e)
+{
+    if(lv_event_get_code(e) != LV_EVENT_SHORT_CLICKED && lv_event_get_code(e) != LV_EVENT_CLICKED) return;
+    struct UI_Contral * UC_P = (struct UI_Contral *)lv_event_get_user_data(e);
+    if(!UC_P) return;
+    Enter_Game_page(UC_P);
+    //延迟切换
+    lv_timer_t * t = lv_timer_create(start_snake_cb, 10, UC_P);
+    lv_timer_set_repeat_count(t, 1);
+}
 
+/*用延迟等待 Game_ui 之后再创建 贪吃蛇游戏 */
+static void start_snake_cb(lv_timer_t * timer)
+{
+    struct UI_Contral * UC_P = (struct UI_Contral *)timer->user_data;
+    if(!UC_P || !UC_P->Game_page || !UC_P->Game_page->Game_ui) { lv_timer_del(timer); return; }
+    Snake_game(UC_P);
+    lv_timer_del(timer);
+}
 
 //2048游戏程序--1
 static void game_2048_event_cb(lv_event_t * e)
@@ -343,7 +379,8 @@ static void game_2048_event_cb(lv_event_t * e)
     if(code == LV_EVENT_VALUE_CHANGED) 
     {
         umask(0000);
-        int sc=open("./scores.txt",O_RDWR|O_CREAT,0777);
+        int sc=open("./Max_2042_scores.txt",O_RDWR|O_CREAT,0777);
+        int sc_2048=open("./2048_scores.txt",O_RDWR|O_CREAT,0777);
         int scores=0;
         lseek(sc, 0, SEEK_SET);
         ssize_t rlen = read(sc, &scores, sizeof(scores));
@@ -990,7 +1027,7 @@ void lv_100ask_memory_game_simple_test(void)
 
     lv_obj_align_to(level_label, slider, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
 }
-
+//Game2----memory
 lv_obj_t * lv_100ask_memory_game_create(lv_obj_t * parent)
 {
     LV_LOG_INFO("begin");
@@ -998,9 +1035,6 @@ lv_obj_t * lv_100ask_memory_game_create(lv_obj_t * parent)
     lv_obj_class_init_obj(obj);
     return obj;
 }
-
-
-
 
 void lv_100ask_memory_game_set_map(lv_obj_t * obj, uint16_t row, uint16_t col)
 {
@@ -1089,8 +1123,6 @@ void lv_100ask_memory_game_set_map(lv_obj_t * obj, uint16_t row, uint16_t col)
     lv_obj_invalidate(obj);
 }
 
-
-
 uint16_t lv_100ask_memory_game_get_row(lv_obj_t * obj)
 {
     LV_ASSERT_OBJ(obj, MY_CLASS_memory);
@@ -1108,8 +1140,6 @@ uint16_t lv_100ask_memory_game_get_col(lv_obj_t * obj)
 
     return memory_game->col;
 }
-
-
 
 static void lv_100ask_memory_game_constructor(const lv_obj_class_t * class_p, lv_obj_t * obj)
 {
@@ -1162,7 +1192,6 @@ static void lv_100ask_memory_game_destructor(const lv_obj_class_t * class_p, lv_
     LV_UNUSED(class_p);
 }
 
-
 static void lv_100ask_memory_game_event(const lv_obj_class_t * class_p, lv_event_t * e)
 {
     LV_UNUSED(class_p);
@@ -1182,8 +1211,6 @@ static void lv_100ask_memory_game_event(const lv_obj_class_t * class_p, lv_event
         lv_100ask_memory_game_set_map(obj, memory_game->row, memory_game->col);
     }
 }
-
-
 
 static void item_event_handler(lv_event_t * e)
 {
@@ -1219,8 +1246,6 @@ static void item_event_handler(lv_event_t * e)
     }
 }
 
-
-
 static void list_rand_number(uint16_t arry[], uint16_t max_count, uint16_t count)
 {
 	int w, t;
@@ -1238,4 +1263,21 @@ static void list_rand_number(uint16_t arry[], uint16_t max_count, uint16_t count
 	    arry[i] = arry[w];
 	    arry[w] = t;
 	}
+}
+//——————————————————————————————————————————————————————————————————————————————————————
+
+static void Snake_game(struct UI_Contral * UC_P)
+{
+    sn_p snake=(sn_p)malloc(sizeof(sn));
+    if(snake==NULL)
+    {
+        perror("malloc sn_p");
+        return ;
+    }
+    memset(snake,0,sizeof(sn));
+    int cols=24,rows=18,cell=20;
+    lv_obj_t * back_page=lv_canvas_create(UC_P->Game_page->Game_ui);
+    lv_obj_t * buf=lv_mem_alloc(800*480);
+    lv_canvas_set_buffer(back_page,buf,)
+    
 }
