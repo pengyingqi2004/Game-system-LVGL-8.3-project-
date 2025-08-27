@@ -8,6 +8,17 @@
         "pthread.h": "c",
         "stdio.h": "c",
         "dirent.h": "c",
-        "lvgl.h": "c"
+        "lvgl.h": "c",
+        "lv_100ask_2048.h": "c",
+        "simple_test.h": "c",
+        "lv_lib_100ask.h": "c",
+        "game.h": "c",
+        "types.h": "c",
+        "lv_lib_100ask_conf.h": "c",
+        "stdlib.h": "c",
+        "evdev.h": "c",
+        "unistd.h": "c",
+        "stdbool.h": "c",
+        "memory_game.h": "c"
     }
 }
