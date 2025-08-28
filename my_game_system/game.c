@@ -61,6 +61,13 @@ void Enter_Main_page(lv_event_t * e)
 }
 //——————————————————————————————————————————————————————————————————————————————————————
 
+//登录界面创建
+LD_P loading_page(struct UI_Contral * UC_P)
+{
+    
+}
+
+
 //主界面基础创建
 M_pg_P Main_page(struct UI_Contral * UC_P)
 {
@@ -211,15 +218,6 @@ bool Game_Show(struct UI_Contral * UC_P)
     lv_obj_add_event_cb(game_memory, game_memory_btn_event_handler, LV_EVENT_SHORT_CLICKED, UC_P);
     return true;
 
-    btn_x+=100;
-    lv_obj_t * game_snake=lv_btn_create(UC_P->Main_page->main_game);
-    lv_obj_set_size(game_snake,game_btn_x,game_btn_x);
-    lv_obj_set_pos(game_snake,btn_x,btn_y);
-    lv_obj_t * game_snake_lab = lv_label_create(UC_P->Main_page->main_game);
-    lv_obj_set_pos(game_snake_lab,105,110);
-    lv_label_set_text(game_snake_lab,"memory game");
-    lv_obj_add_event_cb(game_snake, game_snake_btn_event_handler, LV_EVENT_SHORT_CLICKED, UC_P);
-    return true;
 }
 //——————————————————————————————————————————————————————————————————————————————————————
 
@@ -348,27 +346,6 @@ static void start_memory_cb(lv_timer_t * timer)
     lv_timer_del(timer);
 }
 //——————————————————————————————————————————————————————————————————————————————————————
-//创建函数调用——清除主界面（释放空间，来保证不怎么卡），转到贪吃蛇
-static void game_snake_btn_event_handler(lv_event_t * e)
-{
-    if(lv_event_get_code(e) != LV_EVENT_SHORT_CLICKED && lv_event_get_code(e) != LV_EVENT_CLICKED) return;
-    struct UI_Contral * UC_P = (struct UI_Contral *)lv_event_get_user_data(e);
-    if(!UC_P) return;
-    Enter_Game_page(UC_P);
-    //延迟切换
-    lv_timer_t * t = lv_timer_create(start_snake_cb, 10, UC_P);
-    lv_timer_set_repeat_count(t, 1);
-}
-
-/*用延迟等待 Game_ui 之后再创建 贪吃蛇游戏 */
-static void start_snake_cb(lv_timer_t * timer)
-{
-    struct UI_Contral * UC_P = (struct UI_Contral *)timer->user_data;
-    if(!UC_P || !UC_P->Game_page || !UC_P->Game_page->Game_ui) { lv_timer_del(timer); return; }
-    Snake_game(UC_P);
-    lv_timer_del(timer);
-}
-
 //2048游戏程序--1
 static void game_2048_event_cb(lv_event_t * e)
 {
@@ -1006,7 +983,6 @@ static void slider_event_cb(lv_event_t * e)
     lv_100ask_memory_game_set_map(memory_game, lv_slider_get_value(slider), lv_slider_get_value(slider));
     lv_label_set_text_fmt(level_label, "%d*%d", lv_100ask_memory_game_get_row(memory_game), lv_100ask_memory_game_get_row(memory_game));
 }
-
 //memory游戏2（main)
 void lv_100ask_memory_game_simple_test(void)
 {
@@ -1266,18 +1242,4 @@ static void list_rand_number(uint16_t arry[], uint16_t max_count, uint16_t count
 }
 //——————————————————————————————————————————————————————————————————————————————————————
 
-static void Snake_game(struct UI_Contral * UC_P)
-{
-    sn_p snake=(sn_p)malloc(sizeof(sn));
-    if(snake==NULL)
-    {
-        perror("malloc sn_p");
-        return ;
-    }
-    memset(snake,0,sizeof(sn));
-    int cols=24,rows=18,cell=20;
-    lv_obj_t * back_page=lv_canvas_create(UC_P->Game_page->Game_ui);
-    lv_obj_t * buf=lv_mem_alloc(800*480);
-    lv_canvas_set_buffer(back_page,buf,)
-    
-}
+

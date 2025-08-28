@@ -22,7 +22,6 @@
 
 #include "2048.h"
 #include "memory_game.h"
-#include "snake.h"
 
 #include "../lv_lib_100ask-release-v8.x/lv_lib_100ask.h"
 #include "../lv_lib_100ask_conf.h"
@@ -77,7 +76,6 @@ static void lv_100ask_memory_game_destructor(const lv_obj_class_t * class_p, lv_
 static void lv_100ask_memory_game_event(const lv_obj_class_t * class_p, lv_event_t * e);
 static void list_rand_number(uint16_t arry[], uint16_t max_count, uint16_t count);
 static void item_event_handler(lv_event_t * e);
-static void Snake_game(struct UI_Contral * UC_P)
 
 
 //结构体定义区
@@ -97,6 +95,21 @@ typedef struct Start_page
     lv_obj_t * enter_lab;
 }ST,*ST_P;
 
+typedef struct User_loading_page
+{
+    lv_obj_t * User_ui;
+    lv_obj_t * User_name;
+    lv_obj_t * User_password;
+    lv_obj_t * User_create;
+}LD,*LD_P;
+
+typedef struct User_create_page
+{
+    lv_obj_t * User_create_ui;
+    lv_obj_t * User_create_name;
+    lv_obj_t * User_create_password;
+    lv_obj_t * return_btn;
+}UM,*UM_P;
 typedef struct Main_page
 {
     lv_obj_t * main_ui;
@@ -126,6 +139,8 @@ typedef struct Game_page
 struct UI_Contral
 {
     ST_P   Start_page;
+    LD_P   loading_page;
+    UM_P   create_page;
     M_pg_P Main_page;
     ED_P   End_page; 
     GP_P   Game_page;
