@@ -15,7 +15,7 @@ extern "C" {
  *********************/
 #include "../../lv_lib_100ask.h"
 
-#if LV_100ASK_MEMORY_GAME_SIMPLE_TEST != 0
+#if LV_100ASK_MEMORY_GAME_SIMPLE_TEST != 1
 
 /*********************
  *      DEFINES

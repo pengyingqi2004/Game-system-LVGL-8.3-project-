@@ -19,10 +19,10 @@
 #include <sys/time.h>
 #include <limits.h>
 #include <dirent.h>
-
+#include <errno.h>
 #include "2048.h"
 #include "memory_game.h"
-
+#include "../lvgl/src/misc/lv_anim.h"
 #include "../lv_lib_100ask-release-v8.x/lv_lib_100ask.h"
 #include "../lv_lib_100ask_conf.h"
 #define game_btn_x 80
@@ -95,12 +95,45 @@ typedef struct Start_page
     lv_obj_t * enter_lab;
 }ST,*ST_P;
 
+typedef struct Using_page
+{
+
+    char txt[8];
+    lv_obj_t * loading_btn;
+    lv_obj_t * loading_lab;
+    lv_obj_t * floot_list;
+    lv_obj_t * floot_show_ui;
+    lv_obj_t * User_ui;
+    lv_obj_t * floot_ui;
+    lv_obj_t *label_floor;   // 显示当前楼层
+    lv_obj_t *label_door;    // 显示开门/关门状态
+    lv_obj_t *gif_up;
+    lv_obj_t *gif_down;
+    int current_floor;
+    int target_floor;
+    bool busy;
+    // lv_obj_t * label_dir
+
+}FL,*FL_P;
+
+typedef struct Floot 
+{
+    int floot;
+    struct Floot *next;
+    struct Floot *prev;
+} FT, *FT_P;
+
 typedef struct User_loading_page
 {
-    lv_obj_t * User_ui;
-    lv_obj_t * User_name;
-    lv_obj_t * User_password;
-    lv_obj_t * User_create;
+    lv_obj_t *User_ui;     // 整个登录screen
+    lv_obj_t *backgound;   // 背景图
+    lv_obj_t *card;        // 中间卡片容器
+    lv_obj_t *ta_user;     // 用户名输入
+    lv_obj_t *ta_pass;     // 密码输入
+    lv_obj_t *btn_login;   // 登录按钮
+    lv_obj_t *btn_reg;     // 注册按钮
+    lv_obj_t *btn_back;    // 返回按钮
+    lv_obj_t *kb;          // 软键盘
 }LD,*LD_P;
 
 typedef struct User_create_page
@@ -140,11 +173,10 @@ struct UI_Contral
 {
     ST_P   Start_page;
     LD_P   loading_page;
-    UM_P   create_page;
     M_pg_P Main_page;
     ED_P   End_page; 
     GP_P   Game_page;
-
+    FL_P   Using_page;
 };
 
 
@@ -172,6 +204,8 @@ static lv_style_t cont_style;
 static lv_style_t item_def_style;
 static lv_style_t item_click_style;
 static lv_style_t item_hit_style;
+static lv_style_t style_floor_item, style_floor_item_pr;
+
 //函数定义区（依据使用顺序）
 int game(void);
 ST_P Start_page(struct UI_Contral * UC_P);
@@ -192,5 +226,22 @@ void lv_100ask_2048_simple_test(void);
 static void game_memory_btn_event_handler(lv_event_t * e);
 static void start_memory_cb(lv_timer_t * timer);
 void lv_100ask_memory_game_simple_test(void);
+static void login_btn_cb(lv_event_t *e);
+static void reg_btn_cb(lv_event_t *e);
+static void back_btn_cb(lv_event_t *e);
+LD_P loading_page(struct UI_Contral * UC_P);
+static void _anim_ready_cb(lv_anim_t *a);
+static void _opa_exec_cb(void *obj, int32_t v);
+static void ta_event_cb(lv_event_t * e);
+void Enter_User_page(lv_event_t * e);
+FL_P USING_page(struct UI_Contral * UC_P);
+static void floor_btn_event_cb(lv_event_t *e);
+FT_P Create_Floot(int i,FT_P first_floot);
+static void door_open_done_cb(lv_timer_t * t);
+static void arrive_cb(lv_timer_t * t);
+static void door_close_done_cb(lv_timer_t * t);
+void Enter_USING_page(lv_event_t * e);
+
+// 电梯楼层面板用到的样式与回调
 
  #endif

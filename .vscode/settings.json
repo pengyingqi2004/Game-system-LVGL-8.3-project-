@@ -19,6 +19,8 @@
         "evdev.h": "c",
         "unistd.h": "c",
         "stdbool.h": "c",
-        "memory_game.h": "c"
+        "memory_game.h": "c",
+        "2048.h": "c",
+        "lv_100ask_memory_game.h": "c"
     }
 }
