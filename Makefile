@@ -41,7 +41,7 @@ all: default
 	@echo "CC $<"
     
 default: $(AOBJS) $(COBJS) $(MAINOBJ)
-	$(CC) -o $(BIN) $(MAINOBJ) $(AOBJS) $(COBJS) $(LDFLAGS) -llvgl -L.
+	$(CC) -o $(BIN) $(MAINOBJ) $(AOBJS) $(COBJS) $(LDFLAGS) -llvgl -L. -lpthread
 # -llvgl -L.
 
 clean: 

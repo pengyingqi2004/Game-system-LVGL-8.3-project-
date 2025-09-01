@@ -25,6 +25,10 @@
 #include "../lvgl/src/misc/lv_anim.h"
 #include "../lv_lib_100ask-release-v8.x/lv_lib_100ask.h"
 #include "../lv_lib_100ask_conf.h"
+
+extern int local_time[3];
+void* Time_show(void *arg);
+void* game(void *arg);
 #define game_btn_x 80
 #define game_btn_y 80
 #define MATRIX_SIZE     LV_100ASK_2048_MATRIX_SIZE
@@ -93,6 +97,18 @@ typedef struct Start_page
     lv_obj_t * Start_bottom;
     lv_obj_t * hand_lab;
     lv_obj_t * enter_lab;
+    // ★新增：开始页轮播所需
+    lv_obj_t   *bg_img;                // 用于显示轮播图片（替代 gif）
+    lv_timer_t *slide_timer;           // 轮播定时器
+    char        img_dir[128];          // 图片目录（由主界面设置）
+    char       *img_paths[64];         // 最多64张图片路径（S:/xxx/xx.png）
+    uint16_t    img_count;             // 实际图片数量
+    uint16_t    img_index;             // 当前索引
+    uint16_t    slide_ms;              // 轮播间隔(ms)，例如 2000
+    lv_obj_t *  time_ui;
+    lv_obj_t *  time_lab;
+    lv_timer_t *time_timer;
+
 }ST,*ST_P;
 
 typedef struct Using_page
@@ -112,6 +128,15 @@ typedef struct Using_page
     int current_floor;
     int target_floor;
     bool busy;
+    lv_obj_t *gif_door_open;
+    lv_obj_t *gif_door_close;
+    lv_obj_t * exit_lab;
+    lv_obj_t * exit_btn;
+    lv_obj_t * game_lab;
+    lv_obj_t * game_btn;
+    lv_obj_t * emergency_btn;
+    lv_obj_t * emergency_lab;
+    lv_obj_t *emergency_overlay;
     // lv_obj_t * label_dir
 
 }FL,*FL_P;
@@ -134,6 +159,8 @@ typedef struct User_loading_page
     lv_obj_t *btn_reg;     // 注册按钮
     lv_obj_t *btn_back;    // 返回按钮
     lv_obj_t *kb;          // 软键盘
+
+
 }LD,*LD_P;
 
 typedef struct User_create_page
@@ -152,6 +179,8 @@ typedef struct Main_page
     lv_obj_t * User_inf;
     lv_obj_t * exit_lab;
     lv_obj_t * exit_bottom;
+    lv_obj_t * file_ui;
+    lv_obj_t * img_ui;
 
 }M_pg,*M_pg_P;
 
@@ -168,7 +197,30 @@ typedef struct Game_page
     lv_obj_t * backgound;
     lv_obj_t * back_btn;
     lv_obj_t * back_lab;
+    lv_obj_t * menu_wrap;   // ★新增：游戏大厅卡片容器
+    bool       in_game;
 }GP,*GP_P;
+
+
+typedef struct  dir_bin_inf
+{
+    char dir_name[512];
+    struct UI_Contral * UC_P;
+    struct dir_bin_inf *next;
+    struct dir_bin_inf *prev;
+
+}DBI,*DBI_P;
+
+typedef struct emergency
+{
+    lv_obj_t * emergency_ui;
+    lv_obj_t * emergency_btn;
+    lv_obj_t * emergency_lab;
+    lv_obj_t * emergency_img;
+    lv_obj_t * return_btn;
+    lv_obj_t * return_lab;
+}EM,*EM_P;
+
 struct UI_Contral
 {
     ST_P   Start_page;
@@ -177,28 +229,18 @@ struct UI_Contral
     ED_P   End_page; 
     GP_P   Game_page;
     FL_P   Using_page;
+    DBI_P  dir_bin_inf_head;
+    EM_P   emergency_page;
+    char   cur_dir[512];
 };
 
+/* 原来是：const lv_obj_class_t lv_100ask_2048_class = { ... }; */
+extern const lv_obj_class_t lv_100ask_2048_class;
 
-const lv_obj_class_t lv_100ask_2048_class = {
-    .constructor_cb = lv_100ask_2048_constructor,
-    .destructor_cb  = lv_100ask_2048_destructor,
-    .event_cb       = lv_100ask_2048_event,
-    .width_def      = LV_DPI_DEF * 2,
-    .height_def     = LV_DPI_DEF * 2,
-    .group_def = LV_OBJ_CLASS_GROUP_DEF_TRUE,
-    .instance_size  = sizeof(lv_100ask_2048_t),
-    .base_class     = &lv_obj_class
-};
-const lv_obj_class_t lv_100ask_memory_game_class = {
-    .constructor_cb = lv_100ask_memory_game_constructor,
-    .destructor_cb  = lv_100ask_memory_game_destructor,
-    .event_cb       = lv_100ask_memory_game_event,
-    .width_def      = LV_DPI_DEF * 2,
-    .height_def     = LV_DPI_DEF * 2,
-    .instance_size  = sizeof(lv_100ask_memory_game_t),
-    .base_class     = &lv_obj_class
-};
+/* 原来是：const lv_obj_class_t lv_100ask_memory_game_class = { ... }; */
+extern const lv_obj_class_t lv_100ask_memory_game_class;
+
+
 
 static lv_style_t cont_style;
 static lv_style_t item_def_style;
@@ -207,16 +249,15 @@ static lv_style_t item_hit_style;
 static lv_style_t style_floor_item, style_floor_item_pr;
 
 //函数定义区（依据使用顺序）
-int game(void);
 ST_P Start_page(struct UI_Contral * UC_P);
 void Enter_Main_page(lv_event_t * e);
 M_pg_P Main_page(struct UI_Contral * UC_P);
 void Exit_page(lv_event_t * e);
 ED_P End_page(struct UI_Contral * UC_P);
 void back_to_start_cb(lv_timer_t * timer);
-bool Mode_list(struct UI_Contral * UC_P);
+bool DCM_list(struct UI_Contral * UC_P,const char * obj_dir_path);
 bool Game_Show(struct UI_Contral * UC_P);
-void Enter_Game_page(struct UI_Contral * UC_P);
+void Enter_Game_page(lv_event_t * e);
 GP_P Game_page(struct UI_Contral * UC_P);
 void Return_page(lv_event_t * e);
 static void Game_Show_cb(lv_event_t * e);
@@ -241,7 +282,27 @@ static void door_open_done_cb(lv_timer_t * t);
 static void arrive_cb(lv_timer_t * t);
 static void door_close_done_cb(lv_timer_t * t);
 void Enter_USING_page(lv_event_t * e);
-
+// ★新增：设置开始页图片目录（主界面选择好文件夹后调用一次）
+void Start_page_set_folder(struct UI_Contral *UC_P, const char *dir);
 // 电梯楼层面板用到的样式与回调
+static bool is_img_file(const char *name);
+static uint16_t scan_img_dir(struct Start_page *sp);
+static void slide_timer_cb(lv_timer_t *t);
+void Dir_Btn_Task(lv_event_t *e );
+void File_Btn_Task(lv_event_t *e);
+void Close_Img_Task(lv_event_t * e);
+void File_Btn_gif_Task(lv_event_t *e);
+DBI_P Create_Node(void);
+bool  Head_Add_Node(DBI_P head_node,DBI_P new_node);
+bool  Destory_Dir_Btn_List(DBI_P head_node);
+static bool has_img_ext_ci(const char *name);
+static void emergency_confirm_cb(lv_event_t *e);
+static void emergency_cancel_cb(lv_event_t *e);
+static void emergency_big_btn_cb(lv_event_t *e);
+static void emergency_return_to_using_cb(lv_event_t *e);
+EM_P EMERGENCY_page(struct UI_Contral * UC_P);
+void emergency_enter(lv_event_t * e);
+void Enter_End_page(struct UI_Contral * UC_P);
+
 
  #endif

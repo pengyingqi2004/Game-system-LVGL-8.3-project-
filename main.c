@@ -7,10 +7,10 @@
 #include <time.h>
 #include <sys/time.h>
 #include <stdio.h>
-#include "my_demo/main_page.h"
-
+#include <pthread.h>
+#include "my_game_system/game.h"
 #define DISP_BUF_SIZE (128 * 1024)
-
+int local_time[3]={9,20,50};
 int main(void)
 {
     /*LittlevGL init*/
@@ -53,9 +53,12 @@ int main(void)
 
 
     /*Create a Demo*/
-    game();
-    //main_page();
-    //music_game_create(lv_scr_act());
+    pthread_t tid1,tid2;
+    pthread_create(&tid1,NULL,game,NULL);
+
+    pthread_create(&tid2,NULL,Time_show,NULL);
+
+
 
     /*                                          */
     /*Handle LitlevGL tasks (tickless mode)*/
