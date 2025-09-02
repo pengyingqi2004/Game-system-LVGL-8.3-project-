@@ -80,6 +80,9 @@ static void lv_100ask_memory_game_destructor(const lv_obj_class_t * class_p, lv_
 static void lv_100ask_memory_game_event(const lv_obj_class_t * class_p, lv_event_t * e);
 static void list_rand_number(uint16_t arry[], uint16_t max_count, uint16_t count);
 static void item_event_handler(lv_event_t * e);
+static const char *get_btn_label_text(lv_obj_t *btn); 
+
+
 
 
 //结构体定义区
@@ -137,6 +140,9 @@ typedef struct Using_page
     lv_obj_t * emergency_btn;
     lv_obj_t * emergency_lab;
     lv_obj_t *emergency_overlay;
+    lv_obj_t *dir_up;     // 左侧“上升”指示圆
+    lv_obj_t *dir_down;   // 右侧“下降”指示圆
+    lv_obj_t *floor_dot[10];
     // lv_obj_t * label_dir
 
 }FL,*FL_P;
@@ -303,6 +309,8 @@ static void emergency_return_to_using_cb(lv_event_t *e);
 EM_P EMERGENCY_page(struct UI_Contral * UC_P);
 void emergency_enter(lv_event_t * e);
 void Enter_End_page(struct UI_Contral * UC_P);
+static void indicator_stop(lv_obj_t *obj);
+static void end_bar_tick(lv_timer_t *timer);
 
 
  #endif

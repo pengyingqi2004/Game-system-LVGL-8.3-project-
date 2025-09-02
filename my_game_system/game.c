@@ -13,11 +13,170 @@ static lv_obj_t *g_colon1 = NULL, *g_colon2 = NULL, *g_lab_date = NULL;
 static lv_timer_t *g_blink_timer = NULL;
 
 /* 前置声明 */
-static void time_tick_cb(lv_timer_t *t);   // 我们会“完全替换”你的旧实现
+static void time_tick_cb(lv_timer_t *t);  
 static void clock_blink_cb(lv_timer_t *t);
 static void clock_fade_in(lv_obj_t *obj);
 static void Clock_Create(struct UI_Contral *UC_P);
 static void Clock_Destroy(struct UI_Contral *UC_P);
+/* End_page 进度条上下文：把 bar 和 UC_P 绑在一起，回调里才能跳转 */
+typedef struct {
+    lv_obj_t *bar;
+    struct UI_Contral *UC_P;
+} EndBarCtx;
+
+// 将楼层(-1..9)映射到数组索引(0..9)，越界返回-1
+static int floor_to_idx(int f) {
+    if (f == -1) return 0;
+    if (f >= 1 && f <= 9) return f;
+    return -1;
+}
+
+// 根据当前楼层刷新楼层列表里的小圆点
+static void update_floor_dot(FL_P up) {
+    if (!up) return;
+    // 先全部隐藏
+    for (int i = 0; i < 10; ++i) {
+        if (up->floor_dot[i] && lv_obj_is_valid(up->floor_dot[i]))
+            lv_obj_add_flag(up->floor_dot[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    // 再显示当前楼层对应的小点
+    int idx = floor_to_idx(up->current_floor);
+    if (idx >= 0 && up->floor_dot[idx] && lv_obj_is_valid(up->floor_dot[idx]))
+        lv_obj_clear_flag(up->floor_dot[idx], LV_OBJ_FLAG_HIDDEN);
+}
+
+
+static void end_bar_tick(lv_timer_t *timer) {
+    EndBarCtx *c = (EndBarCtx *)timer->user_data;
+    if(!c || !c->bar) { lv_timer_del(timer); return; }
+
+    int v = lv_bar_get_value(c->bar);
+    if(v < 100) {
+        lv_bar_set_value(c->bar, v + 5, LV_ANIM_ON);
+        return;
+    }
+
+    lv_timer_del(timer);                 // 满了 → 关定时器
+    lv_timer_t *t2 = lv_timer_create(back_to_start_cb, 10, c->UC_P);  // 跳转
+    if(t2) lv_timer_set_repeat_count(t2, 1);
+    free(c);                             // 释放上下文
+}
+
+
+/*进界面后50ms再强制把每个label刷成白字，避免后续覆盖 */
+static lv_obj_t *find_label_deep(lv_obj_t *parent); 
+
+// 逐层移动回调
+static void step_move_cb(lv_timer_t *t)
+{
+    struct UI_Contral *UC_P = (struct UI_Contral *)t->user_data;
+    if(!UC_P || !UC_P->Using_page) { lv_timer_del(t); return; }
+    FL_P up = UC_P->Using_page;
+
+    if(up->current_floor == up->target_floor) {
+        // 到达目标层 → 关闭定时器，进入开门逻辑
+        lv_timer_del(t);
+        //到站后关闭两侧指示灯
+        indicator_stop(up->dir_up);
+        indicator_stop(up->dir_down);
+
+        // 停止上下箭头
+        if(up->gif_up   && lv_obj_is_valid(up->gif_up))   lv_obj_add_flag(up->gif_up,   LV_OBJ_FLAG_HIDDEN);
+        if(up->gif_down && lv_obj_is_valid(up->gif_down)) lv_obj_add_flag(up->gif_down, LV_OBJ_FLAG_HIDDEN);
+
+        // 刷新显示文本
+        char buf[32];
+        snprintf(buf, sizeof(buf), "local floor: %dF", up->current_floor);
+        lv_label_set_text(up->label_floor, buf);
+        update_floor_dot(up);
+
+        // 开门流程
+        lv_label_set_text(up->label_door, "Opening...");
+        lv_obj_clear_flag(up->gif_door_open, LV_OBJ_FLAG_HIDDEN);
+        lv_gif_restart(up->gif_door_open);
+
+        lv_timer_t *open_t = lv_timer_create(door_open_done_cb, 5000, UC_P);
+        if(open_t) lv_timer_set_repeat_count(open_t, 1);
+        else up->busy = false;
+
+        return;
+    }
+
+    // 尚未到目标层：逐层增加或减少
+    if(up->target_floor > up->current_floor) {
+        up->current_floor++;
+        if(up->current_floor==0)
+        {
+            up->current_floor++;
+        }
+    } else {
+        up->current_floor--;
+        if(up->current_floor==0)
+        {
+            up->current_floor--;
+        }
+    }
+
+    // 刷新显示
+    char buf[32];
+    snprintf(buf, sizeof(buf), "local floor: %dF", up->current_floor);
+    lv_label_set_text(up->label_floor, buf);
+
+    update_floor_dot(up);
+}
+
+static void fix_floor_labels_once(lv_timer_t *t)
+{
+    struct UI_Contral *UC = (struct UI_Contral *)t->user_data;
+    if(!UC || !UC->Using_page) { lv_timer_del(t); return; }
+    lv_obj_t *list = UC->Using_page->floot_list;
+    if(!list || !lv_obj_is_valid(list)) { lv_timer_del(t); return; }
+
+    uint32_t n = lv_obj_get_child_cnt(list);
+    for(uint32_t i = 0; i < n; i++) {
+        lv_obj_t *btn = lv_obj_get_child(list, i);
+        if(!btn) continue;
+
+        /* 父项再明确一次（双保险） */
+        lv_obj_set_style_text_color(btn, lv_color_white(), 0);
+        lv_obj_set_style_text_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_text_font(btn, &lv_font_montserrat_20, 0);
+
+        /* 子 label 再刷一遍（避免某些主题/延迟样式覆写） */
+        lv_obj_t *lab = find_label_deep(btn);
+        if(lab) {
+            lv_obj_clear_flag(lab, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_text_color(lab, lv_color_white(), 0);
+            lv_obj_set_style_text_opa(lab, LV_OPA_COVER, 0);
+            lv_obj_set_style_text_font(lab, &lv_font_montserrat_20, 0);
+        }
+    }
+    lv_timer_del(t);
+}
+// 指示灯开始闪烁（透明度 255<->0 循环）
+static void indicator_start_blink(lv_obj_t *obj)
+{
+    if(!obj) return;
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(obj, LV_OPA_COVER, 0);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, obj);
+    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_time(&a, 350);
+    lv_anim_set_playback_time(&a, 350);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_exec_cb(&a, _opa_exec_cb);
+    lv_anim_start(&a);
+}
+// 停止闪烁并隐藏
+static void indicator_stop(lv_obj_t *obj)
+{
+    if(!obj) return;
+    lv_anim_del(obj, _opa_exec_cb);
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
 
 /* —— list/列表项样式 —— */
 static bool g_elev_list_style_inited = false;
@@ -58,16 +217,27 @@ static void elevator_list_styles_init(void)
     lv_style_init(&s_item);
     lv_style_set_radius(&s_item, 12);
     lv_style_set_bg_opa(&s_item, LV_OPA_COVER);
-    lv_style_set_bg_color(&s_item, lv_color_hex(0x2B2F36));
+
+    /* === 原来是深灰，改成白底 === */
+    lv_style_set_bg_color(&s_item, lv_color_hex(0xFFFFFF));
+
     lv_style_set_border_width(&s_item, 1);
-    lv_style_set_border_color(&s_item, lv_color_hex(0x3D444D));
-    lv_style_set_shadow_width(&s_item, 16);
-    lv_style_set_shadow_opa(&s_item, LV_OPA_30);
+    lv_style_set_border_color(&s_item, lv_color_hex(0xD8DDE5));
+    lv_style_set_shadow_width(&s_item, 12);
+    lv_style_set_shadow_opa(&s_item, LV_OPA_20);
     lv_style_set_pad_hor(&s_item, 14);
     lv_style_set_pad_ver(&s_item, 10);
-    lv_style_set_height(&s_item, 50);             // 统一项高度
-    lv_style_set_width(&s_item, LV_PCT(100));     // 铺满 list 宽度
+    lv_style_set_height(&s_item, 50);
+    lv_style_set_width(&s_item, LV_PCT(100));
     lv_style_set_anim_time(&s_item, 120);
+
+    /* === 关键：深色文字 + 居中 + 20号 === */
+    lv_style_set_text_color(&s_item, lv_color_hex(0x111111));
+    lv_style_set_text_opa(&s_item, LV_OPA_COVER);
+    lv_style_set_text_font(&s_item, &lv_font_montserrat_20);
+    lv_style_set_text_align(&s_item, LV_TEXT_ALIGN_CENTER);
+
+
 
     /* 项-按下 */
     lv_style_init(&s_item_pr);
@@ -95,9 +265,11 @@ static void elevator_list_styles_init(void)
     lv_style_set_text_font(&s_item_label, &lv_font_montserrat_20);
     lv_style_set_text_color(&s_item_label, lv_color_hex(0xFFFFFF));
     lv_style_set_text_letter_space(&s_item_label, 1);
+
+
+
+
 }
-
-
 /* 轻微淡入动画：用于每秒更新后让秒数字更柔和 */
 static void clock_fade_in(lv_obj_t *obj)
 {
@@ -113,14 +285,11 @@ static void clock_fade_in(lv_obj_t *obj)
 
     lv_anim_start(&a);
 }
-
-// 放到 game.c 顶部的静态函数区
 static void boot_enter_end_cb(lv_timer_t *t){
     struct UI_Contral *UC = (struct UI_Contral *)t->user_data;
     if(UC) Enter_End_page(UC);
     lv_timer_del(t);
 }
-
 /* 闪烁计时器：每 500ms 切换冒号可见性 */
 /* 闪烁计时器：只改透明度，不隐藏对象，避免布局抖动 */
 static void clock_blink_cb(lv_timer_t *t)
@@ -140,9 +309,6 @@ static void clock_blink_cb(lv_timer_t *t)
     lv_obj_set_style_opa(g_colon1, new_opa, 0);
     lv_obj_set_style_opa(g_colon2, new_opa, 0);
 }
-
-
-
 /* 创建美化时钟（半透明底板 + 时间行 + 日期行 + 定时器） */
 static void Clock_Create(struct UI_Contral *UC_P)
 {
@@ -247,7 +413,6 @@ static void Clock_Create(struct UI_Contral *UC_P)
     /* 5) 立即刷新一次，避免空白 */
     time_tick_cb(UC_P->Start_page->time_timer);
 }
-
 /* 销毁/清理（在离开 Start_page 时调用） */
 static void Clock_Destroy(struct UI_Contral *UC_P)
 {
@@ -261,7 +426,6 @@ static void Clock_Destroy(struct UI_Contral *UC_P)
     }
     g_lab_hour = g_lab_min = g_lab_sec = g_colon1 = g_colon2 = g_lab_date = NULL;
 }
-
 /* 递归在某个父对象下找到第一个 label */
 static lv_obj_t *find_label_deep(lv_obj_t *parent)
 {
@@ -276,8 +440,6 @@ static lv_obj_t *find_label_deep(lv_obj_t *parent)
     }
     return NULL;
 }
-
-
 const lv_obj_class_t lv_100ask_2048_class = {
     .constructor_cb = lv_100ask_2048_constructor,
     .destructor_cb  = lv_100ask_2048_destructor,
@@ -332,6 +494,17 @@ static void init_game_styles(void) {
     lv_style_set_text_color(&g_tag, lv_color_hex(0xffffff));
 }
 
+// 重置运动可视元素：隐藏上下GIF、停指示灯
+static void motion_reset(FL_P up)
+{
+    if(!up) return;
+    // 隐藏方向GIF
+    if(up->gif_up   && lv_obj_is_valid(up->gif_up))   lv_obj_add_flag(up->gif_up,   LV_OBJ_FLAG_HIDDEN);
+    if(up->gif_down && lv_obj_is_valid(up->gif_down)) lv_obj_add_flag(up->gif_down, LV_OBJ_FLAG_HIDDEN);
+    // 保险：停掉左右指示灯的闪烁
+    indicator_stop(up->dir_up);
+    indicator_stop(up->dir_down);
+}
 
 // 适配 lv_anim 的回调签名，安全设置透明度 & 在动画正常结束时删除对象
 static void _opa_exec_cb(void *obj, int32_t v) 
@@ -404,7 +577,7 @@ static int write_text(const char *path, const char *s)
     return 0;
 }
 
-// —— 新增：更稳地从按钮拿到 label 文本（不假定 child(0) 一定是 label）——
+//从按钮拿到 label 文本（不假定 child(0) 一定是 label）——
 static const char *get_btn_label_text(lv_obj_t *btn) {
     if(!btn) return NULL;
     uint32_t cnt = lv_obj_get_child_cnt(btn);
@@ -417,7 +590,7 @@ static const char *get_btn_label_text(lv_obj_t *btn) {
     return NULL;
 }
 
-// ★新增：判断是否是我们支持的图片后缀
+//判断是否是我们支持的图片后缀
 static bool is_img_file(const char *name)
 {
     if(!name) return false;
@@ -430,7 +603,7 @@ static bool is_img_file(const char *name)
     return strcmp(ext,"png")==0 || strcmp(ext,"jpg")==0 || strcmp(ext,"jpeg")==0 || strcmp(ext,"bmp")==0;
 }
 
-// ★新增：扫描目录，填充 sp->img_paths[]，返回数量
+// 扫描目录，填充 sp->img_paths[]，返回数量
 static uint16_t scan_img_dir(struct Start_page *sp)
 {
     if(!sp || sp->img_dir[0]=='\0') return 0;
@@ -476,7 +649,7 @@ static uint16_t scan_img_dir(struct Start_page *sp)
     return sp->img_count;
 }
 
-// ★新增：定时器回调，切换图片
+//定时器回调，切换图片
 static void slide_timer_cb(lv_timer_t *t)
 {
     if(!t) return;
@@ -486,10 +659,6 @@ static void slide_timer_cb(lv_timer_t *t)
     sp->img_index = (sp->img_index + 1) % sp->img_count;
     lv_img_set_src(sp->bg_img, sp->img_paths[sp->img_index]);
 }
-
-
-
-
 //函数开始调用
 void *game(void* arg)
 {
@@ -505,9 +674,6 @@ void *game(void* arg)
     return NULL;
 }
 
-//——————————————————————————————————————————————————————————————————————————————————————
-
-// 放在本文件的顶部或 Start_page() 前面
 /* ====== 美化时钟：每秒刷新数值与日期 ====== */
 static void time_tick_cb(lv_timer_t *t)
 {
@@ -552,16 +718,11 @@ static void time_tick_cb(lv_timer_t *t)
             snprintf(buf, sizeof(buf), "%s", wd[lt->tm_wday]);
             char date_line[64];
             snprintf(date_line, sizeof(date_line), "%04d-%02d-%02d  %s",
-                     lt->tm_year + 1910, lt->tm_mon + 9, lt->tm_mday, buf);
+                     lt->tm_year + 1910, lt->tm_mon + 9, lt->tm_mday+1, buf);
             lv_label_set_text(g_lab_date, date_line);
         }
     }
 }
-
-
-
-
-
 //开始界面设置
 ST_P Start_page(struct UI_Contral * UC_P)
 {
@@ -647,12 +808,6 @@ ST_P Start_page(struct UI_Contral * UC_P)
    return UC_P->Start_page;
 }
 //——————————————————————————————————————————————————————————————————————————————————————
-
-
-
-
-
-
 void Enter_User_page(lv_event_t * e)
 {
     struct UI_Contral * UC_P = (struct UI_Contral *)lv_event_get_user_data(e);
@@ -681,7 +836,6 @@ void Enter_User_page(lv_event_t * e)
     }
 }
 
-
 FL_P USING_page(struct UI_Contral * UC_P)
 {
     UC_P->Using_page = malloc(sizeof(FL));
@@ -695,14 +849,30 @@ FL_P USING_page(struct UI_Contral * UC_P)
     UC_P->Using_page->User_ui=lv_obj_create(NULL);
     UC_P->Using_page->floot_list=lv_list_create(UC_P->Using_page->User_ui);
 
+
+
+
+    // list 基本样式
     elevator_list_styles_init();
     lv_obj_add_style(UC_P->Using_page->floot_list, &s_list_main, 0);
     lv_obj_add_style(UC_P->Using_page->floot_list, &s_list_scrollbar, LV_PART_SCROLLBAR);
 
+
+
+    // ★ 关键：对 LV_PART_ITEMS 指定文本样式（覆盖主题/延迟刷新）
+    lv_obj_set_style_text_color(UC_P->Using_page->floot_list, lv_color_hex(0x111111), LV_PART_ITEMS);
+    lv_obj_set_style_text_opa(UC_P->Using_page->floot_list, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(UC_P->Using_page->floot_list, &lv_font_montserrat_20, LV_PART_ITEMS);
+    lv_obj_set_style_text_align(UC_P->Using_page->floot_list, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
+
+    // item 背景/按下/选中
     lv_obj_add_style(UC_P->Using_page->floot_list, &s_item,     LV_PART_ITEMS);
     lv_obj_add_style(UC_P->Using_page->floot_list, &s_item_pr,  LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_add_style(UC_P->Using_page->floot_list, &s_item_chk, LV_PART_ITEMS | LV_STATE_CHECKED);
     lv_obj_add_style(UC_P->Using_page->floot_list, &s_item_dis, LV_PART_ITEMS | LV_STATE_DISABLED);
+
+
+
 
     lv_obj_set_size(UC_P->Using_page->floot_list,200,450);
     lv_obj_set_pos(UC_P->Using_page->floot_list,10,10);
@@ -760,12 +930,12 @@ FL_P USING_page(struct UI_Contral * UC_P)
 
 
     UC_P->Using_page->gif_door_open = lv_gif_create(UC_P->Using_page->floot_ui);
-    lv_obj_set_pos(UC_P->Using_page->gif_door_open, 200, 120); // 位置你可以调
+    lv_obj_set_pos(UC_P->Using_page->gif_door_open, 150, 120);
     lv_gif_set_src(UC_P->Using_page->gif_door_open, "S:/door_open.gif");
     lv_obj_add_flag(UC_P->Using_page->gif_door_open, LV_OBJ_FLAG_HIDDEN);
 
     UC_P->Using_page->gif_door_close = lv_gif_create(UC_P->Using_page->floot_ui);
-    lv_obj_set_pos(UC_P->Using_page->gif_door_close, 200, 120);
+    lv_obj_set_pos(UC_P->Using_page->gif_door_close, 150, 120);
     lv_gif_set_src(UC_P->Using_page->gif_door_close, "S:/door_close.gif");
     lv_obj_add_flag(UC_P->Using_page->gif_door_close, LV_OBJ_FLAG_HIDDEN);
 
@@ -776,31 +946,60 @@ FL_P USING_page(struct UI_Contral * UC_P)
     // lv_obj_align_to(UC_P->Using_page->label_dir, UC_P->Using_page->label_door, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
     // lv_obj_set_style_text_color(UC_P->Using_page->label_dir, lv_color_hex(0xA0FFA0), 0);
 
-    // 楼层/门状态文字
+       // 楼层/门状态文字
     UC_P->Using_page->label_floor = lv_label_create(UC_P->Using_page->floot_ui);
     lv_obj_set_style_text_font(UC_P->Using_page->label_floor, &lv_font_montserrat_32, 0);
     lv_label_set_text(UC_P->Using_page->label_floor, "local floor: 1F");
-    lv_obj_align(UC_P->Using_page->label_floor, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_align(UC_P->Using_page->label_floor, LV_ALIGN_TOP_MID, -50, 10);
+
+    /* ===：左右圆形指示灯 === */
+    // 左：上升灯（绿色）
+    UC_P->Using_page->dir_up = lv_btn_create(UC_P->Using_page->floot_ui);
+    lv_obj_set_size(UC_P->Using_page->dir_up, 26, 26);
+    lv_obj_set_style_radius(UC_P->Using_page->dir_up, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(UC_P->Using_page->dir_up, lv_color_hex(0x14C38E), 0);
+    lv_obj_set_style_border_width(UC_P->Using_page->dir_up, 0, 0);
+    lv_obj_add_flag(UC_P->Using_page->dir_up, LV_OBJ_FLAG_CLICKABLE); // 保持按钮性质，如不想可加 HIDDEN_CLICKABLE
+    lv_obj_add_flag(UC_P->Using_page->dir_up, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align_to(UC_P->Using_page->dir_up, UC_P->Using_page->label_floor, LV_ALIGN_OUT_LEFT_MID, -10, 0);
+    // lv_obj_t * left =lv_label_create(UC_P->Using_page->dir_up);
+    // lv_obj_center(left);
+    // lv_label_set_text(left,"up");
+
+
+    // 右：下降灯（橙色）
+    UC_P->Using_page->dir_down = lv_btn_create(UC_P->Using_page->floot_ui);
+    lv_obj_set_size(UC_P->Using_page->dir_down, 26, 26);
+    lv_obj_set_style_radius(UC_P->Using_page->dir_down, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(UC_P->Using_page->dir_down, lv_color_hex(0xFF8C42), 0);
+    lv_obj_set_style_border_width(UC_P->Using_page->dir_down, 0, 0);
+    lv_obj_add_flag(UC_P->Using_page->dir_down, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(UC_P->Using_page->dir_down, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align_to(UC_P->Using_page->dir_down, UC_P->Using_page->label_floor, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    // lv_obj_t * right =lv_label_create(UC_P->Using_page->dir_up);
+    // lv_obj_center(right);
+    // lv_label_set_text(right,"down");
 
     UC_P->Using_page->label_door = lv_label_create(UC_P->Using_page->floot_ui);
     lv_obj_set_style_text_font(UC_P->Using_page->label_door, &lv_font_montserrat_32, 0);
     lv_label_set_text(UC_P->Using_page->label_door, "");
-    lv_obj_align_to(UC_P->Using_page->label_door, UC_P->Using_page->label_floor, LV_ALIGN_OUT_BOTTOM_MID, -60, 20);
+    lv_obj_align_to(UC_P->Using_page->label_door, UC_P->Using_page->label_floor, LV_ALIGN_OUT_BOTTOM_MID, -80, 20);
 
     // 上下行 GIF（默认隐藏）
     UC_P->Using_page->gif_up = lv_gif_create(UC_P->Using_page->floot_ui);
-    lv_obj_set_pos(UC_P->Using_page->gif_up,200,120);
+    lv_obj_set_pos(UC_P->Using_page->gif_up,150,120);
     lv_gif_set_src(UC_P->Using_page->gif_up, "S:/elevator_up.gif");
     lv_obj_add_flag(UC_P->Using_page->gif_up, LV_OBJ_FLAG_HIDDEN);
 
     UC_P->Using_page->gif_down = lv_gif_create(UC_P->Using_page->floot_ui);
-    lv_obj_set_pos(UC_P->Using_page->gif_down,200,120);
+    lv_obj_set_pos(UC_P->Using_page->gif_down,150,120);
     lv_gif_set_src(UC_P->Using_page->gif_down, "S:/elevator_down.gif");
     lv_obj_add_flag(UC_P->Using_page->gif_down, LV_OBJ_FLAG_HIDDEN);
 
     UC_P->Using_page->current_floor = 1;
     UC_P->Using_page->target_floor = 1;
     UC_P->Using_page->busy = false;
+    update_floor_dot(UC_P->Using_page);
 
     // static bool style_inited = false;
     // if(!style_inited) 
@@ -851,22 +1050,44 @@ FL_P USING_page(struct UI_Contral * UC_P)
         FT_P node = Create_Floot(i, first_floot);
         (void)node;  // 目前没用到，防告警
 
-    lv_obj_t *btn = lv_list_add_btn(UC_P->Using_page->floot_list, NULL, UC_P->Using_page->txt);
-    lv_obj_add_event_cb(btn, floor_btn_event_cb, LV_EVENT_CLICKED, UC_P);
+        lv_obj_t *btn = lv_list_add_btn(UC_P->Using_page->floot_list, NULL, UC_P->Using_page->txt);
+        lv_obj_add_event_cb(btn, floor_btn_event_cb, LV_EVENT_CLICKED, UC_P);
 
-    /* 用官方API直接拿 label，比 find_label_deep 稳定 */
-    lv_obj_t *lab = find_label_deep(btn);
-    if(lab) 
-    {
-        lv_obj_add_style(lab, &s_item_label, 0);
-    }
+        /* 在每个楼层按钮里加一个小圆点（默认隐藏） */
+        lv_obj_t *dot = lv_obj_create(btn);
+        lv_obj_remove_style_all(dot);                  // 干净的圆点
+        lv_obj_set_size(dot, 10, 10);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(0x14C38E), 0); // 绿色，按需改
+        lv_obj_align(dot, LV_ALIGN_LEFT_MID, 8, 0);
+        lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
+
+        // 保存到 floor_dot[]：-1..9F → 0..10（跳过 0F）
+        int idx = floor_to_idx(i);
+        if (idx >= 0) UC_P->Using_page->floor_dot[idx] = dot;
+
+
+        /* 直接对 label 设置属性：深色字 + 不透明 + 20号 + 置中 + 让它铺满以便真正居中 */
+        lv_obj_t *lab = find_label_deep(btn);
+        if (lab) {
+            lv_obj_set_style_text_color(lab, lv_color_hex(0x111111), 0);
+            lv_obj_set_style_text_opa(lab, LV_OPA_COVER, 0);
+            lv_obj_set_style_text_font(lab, &lv_font_montserrat_20, 0);
+            lv_obj_set_style_text_align(lab, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_width(lab, LV_PCT(100));       // 关键：label 撑满才能真正居中
+        }
+
+
 
     }
+    // /* 生成楼层项的for循环结束后，追加： */
+    // lv_timer_t *once = lv_timer_create(fix_floor_labels_once, 50, UC_P);
+    // lv_timer_set_repeat_count(once, 1);
 
 
     return UC_P->Using_page;
 }
-
 
 FT_P Create_Floot(int i,FT_P first_floot)
 {
@@ -928,30 +1149,63 @@ static void floor_btn_event_cb(lv_event_t *e)
         if(!t) { up->busy = false; return; }
         lv_timer_set_repeat_count(t, 1);
         // 可视效果（这里按你的资源做最小化处理）
-        if(up->gif_up && lv_obj_is_valid(up->gif_up))   lv_obj_clear_flag(up->gif_up,   LV_OBJ_FLAG_HIDDEN);
-        if(up->gif_down && lv_obj_is_valid(up->gif_down)) lv_obj_add_flag(up->gif_down, LV_OBJ_FLAG_HIDDEN);
+        if(up->target_floor == up->current_floor) 
+        {
+            // 直接开门动画：立刻置忙
+            up->busy = true;
+            lv_label_set_text(up->label_door, "Opening...");
+
+            // 先重置可视 → 只展示开门GIF
+            motion_reset(up);
+            if(up->gif_door_open && lv_obj_is_valid(up->gif_door_open)) {
+                lv_obj_clear_flag(up->gif_door_open, LV_OBJ_FLAG_HIDDEN);
+                lv_gif_restart(up->gif_door_open);
+            }
+
+            // 维持你原本的 5s 开门完成 → 走关门流程
+            lv_timer_t *t = lv_timer_create(door_open_done_cb, 5000, UC_P);
+            if(!t) { up->busy = false; return; }
+            lv_timer_set_repeat_count(t, 1);
+            return;
+        }
+
 
         return;
     }
 
     // 不同层：开始“上/下行”动画
-    if(up->target_floor > up->current_floor) {
+    if(up->target_floor > up->current_floor) 
+    {
+        motion_reset(up); 
+        indicator_stop(up->dir_up);
+        indicator_stop(up->dir_down);
         lv_label_set_text(up->label_door, "Uping...");
         if(up->gif_up   && lv_obj_is_valid(up->gif_up))   lv_obj_clear_flag(up->gif_up,   LV_OBJ_FLAG_HIDDEN);
         if(up->gif_down && lv_obj_is_valid(up->gif_down)) lv_obj_add_flag(up->gif_down, LV_OBJ_FLAG_HIDDEN);
+
+        // ★新增：上升 → 点亮左侧并闪烁，关闭右侧
+        indicator_start_blink(up->dir_up);
+        indicator_stop(up->dir_down);
     } else {
+        motion_reset(up); 
         lv_label_set_text(up->label_door, "Dwon...");
         if(up->gif_down && lv_obj_is_valid(up->gif_down)) lv_obj_clear_flag(up->gif_down, LV_OBJ_FLAG_HIDDEN);
         if(up->gif_up   && lv_obj_is_valid(up->gif_up))   lv_obj_add_flag(up->gif_up,   LV_OBJ_FLAG_HIDDEN);
+
+        // ★新增：下降 → 点亮右侧并闪烁，关闭左侧
+        indicator_start_blink(up->dir_down);
+        indicator_stop(up->dir_up);
     }
 
-    // 立刻置忙，创建“到站”回调定时器（你原来是 2000ms 可按需保持）
-    up->busy = true;
-    lv_timer_t *t = lv_timer_create(arrive_cb, 2000, UC_P);
-    if(!t) { up->busy = false; return; }
-    lv_timer_set_repeat_count(t, 1);
-}
 
+
+// 逐层移动：比如每 1000ms 移动一层
+    up->busy = true;
+    lv_timer_t *t = lv_timer_create(step_move_cb, 1000, UC_P);
+    if(!t) { up->busy = false; return; }
+    lv_timer_set_repeat_count(t, -1); // 无限循环，直到 step_move_cb 自己删
+
+}
 
 static void arrive_cb(lv_timer_t *t)
 {
@@ -968,6 +1222,8 @@ static void arrive_cb(lv_timer_t *t)
 
     // 到站：更新当前楼层
     up->current_floor = up->target_floor;
+    update_floor_dot(up);
+
 
     // 停止运动动画
     if(up->gif_up   && lv_obj_is_valid(up->gif_up))   lv_obj_add_flag(up->gif_up,   LV_OBJ_FLAG_HIDDEN);
@@ -977,6 +1233,7 @@ static void arrive_cb(lv_timer_t *t)
     char buf[32];
     snprintf(buf, sizeof(buf), "local floor: %dF", up->current_floor);
     lv_label_set_text(up->label_floor, buf);
+    update_floor_dot(up);
 
     // 进入开门阶段：创建“开门完成”回调
     lv_label_set_text(up->label_door, "Opening...");
@@ -991,9 +1248,6 @@ static void arrive_cb(lv_timer_t *t)
         return;
     }
     lv_timer_set_repeat_count(open_t, 1);
-
-    // 可以在这里触发一次“开门”可视效果，如果你有门 GIF/动画就切换显示
-    // （保持最小改动：这里不强加额外对象）
 
     lv_timer_del(t);
 }
@@ -1031,7 +1285,6 @@ static void door_open_done_cb(lv_timer_t *t)
 
 }
 
-
 static void door_close_done_cb(lv_timer_t *t)
 {
     struct UI_Contral *UC_P = (struct UI_Contral *)t->user_data;
@@ -1053,8 +1306,11 @@ static void door_close_done_cb(lv_timer_t *t)
     // 如需“关门完成”的可视状态，可在此切换显示对象（最小改动就不加）
 
     lv_timer_del(t);
-}
+    //整个流程收尾，确保都关闭
+    indicator_stop(up->dir_up);
+    indicator_stop(up->dir_down);
 
+}
 
 // 完成主界面后启用管理员界面转入
 void Enter_USING_page(lv_event_t * e)
@@ -1076,14 +1332,12 @@ void Enter_USING_page(lv_event_t * e)
             free(UC_P->Start_page->img_paths[i]);
             UC_P->Start_page->img_paths[i] = NULL;
         }
-        // 不要再手动 del Start_ui（已由 lv_scr_load_anim(..., true) 自动删除）
+
         free(UC_P->Start_page);
         UC_P->Start_page = NULL;
     }
     return;
 }
-
-
 
 //进入主界面按钮回调
 void Enter_Main_page(lv_event_t * e)
@@ -1129,7 +1383,7 @@ if(UC_P->Start_page){
 //登录界面创建
 LD_P loading_page(struct UI_Contral * UC_P)
 {
-        // [新增] 防止重复进入或使用已删除对象
+        //防止重复进入或使用已删除对象
     if (UC_P->loading_page && UC_P->loading_page->User_ui) {
         if (lv_obj_is_valid(UC_P->loading_page->User_ui)) {
             lv_scr_load_anim(UC_P->loading_page->User_ui, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, true);
@@ -1304,7 +1558,7 @@ M_pg_P Main_page(struct UI_Contral * UC_P)
         snprintf(UC_P->cur_dir, sizeof(UC_P->cur_dir), "%s", DEFAULT_SHOW_DIR); // 比如 "/"
     }
 
-    // 让开始页的轮播与当前目录保持一致（注意加 "S:" 前缀）
+    // 让开始页的轮播与当前目录保持一致
     {
         char fs_dir[600];
         snprintf(fs_dir, sizeof(fs_dir), "S:%s", UC_P->cur_dir);
@@ -1352,18 +1606,49 @@ void Exit_page(lv_event_t * e)
     lv_scr_load_anim(UC_P->End_page->end_ui,LV_SCR_LOAD_ANIM_FADE_ON,500,0,true);
     free(UC_P->Main_page);
     UC_P->Main_page=NULL;
-    lv_timer_t * t = lv_timer_create(back_to_start_cb, 5000, UC_P);
+    lv_timer_t * t = lv_timer_create(back_to_start_cb, 2000, UC_P);
     lv_timer_set_repeat_count(t, 1);  // 只执行一次
     return ;
 }
 //——————————————————————————————————————————————————————————————————————————————————————
-void Enter_End_page(struct UI_Contral * UC_P)
+void Enter_End_page(struct UI_Contral *UC_P)
 {
-    UC_P->End_page=End_page(UC_P);
-    lv_scr_load_anim(UC_P->End_page->end_ui,LV_SCR_LOAD_ANIM_FADE_ON,500,0,true);
-    lv_timer_t * t = lv_timer_create(back_to_start_cb, 5000, UC_P);
-    lv_timer_set_repeat_count(t, 1);  // 只执行一次
-    return ;
+    UC_P->End_page = malloc(sizeof(struct End_page));
+    memset(UC_P->End_page, 0, sizeof(struct End_page));
+
+    /* 创建 screen 并上背景色 */
+    UC_P->End_page->end_ui = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(UC_P->End_page->end_ui, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_bg_opa  (UC_P->End_page->end_ui, LV_OPA_COVER, 0);
+
+    /* 大标题 lab */
+    UC_P->End_page->end_lab = lv_label_create(UC_P->End_page->end_ui);
+    lv_obj_set_style_text_font(UC_P->End_page->end_lab, &lv_font_montserrat_32, 0);
+    lv_label_set_text(UC_P->End_page->end_lab, "Thank you for using!");
+    lv_obj_align(UC_P->End_page->end_lab, LV_ALIGN_TOP_MID, 0, 80);
+
+    /* === 关键：在 end_lab 正下方加进度条 === */
+    lv_obj_t *bar = lv_bar_create(UC_P->End_page->end_ui);
+    lv_obj_set_size(bar, 420, 28);
+    lv_bar_set_range(bar, 0, 100);
+    lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+    lv_obj_align_to(bar, UC_P->End_page->end_lab, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
+
+    /* 美化 */
+    lv_obj_set_style_radius(bar, 14, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_30, 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_radius(bar, 14, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x3A80F6), LV_PART_INDICATOR);
+
+    /* 定时器：进度走到 100% 时调用 back_to_start_cb() 跳转 */
+    EndBarCtx *ctx = malloc(sizeof(EndBarCtx));
+    ctx->bar = bar;
+    ctx->UC_P = UC_P;
+    lv_timer_t *tmr = lv_timer_create(end_bar_tick, 200, ctx);
+    lv_timer_set_repeat_count(tmr, -1);
+
+    lv_scr_load_anim(UC_P->End_page->end_ui, LV_SCR_LOAD_ANIM_FADE_ON, 500, 0, true);
 }
 
 //退出界面
@@ -1416,12 +1701,9 @@ void back_to_start_cb(lv_timer_t * timer)
     }
     lv_timer_del(timer);
 }
-
 //——————————————————————————————————————————————————————————————————————————————————————
-
 //功能list创建
 //——————————————————————————————————————————————————————————————————————————————————————
-
 
 bool DCM_list(struct UI_Contral * UC_P, const char *obj_dir_path)
 {
@@ -1459,7 +1741,7 @@ bool DCM_list(struct UI_Contral * UC_P, const char *obj_dir_path)
                 snprintf(up->dir_name, sizeof(up->dir_name), "%s", obj_dir_path);
                 char *last = strrchr(up->dir_name, '/');
                 if (last) {
-                    if (last == up->dir_name) { // "/xxx" → "/"
+                    if (last == up->dir_name) {
                         up->dir_name[1] = '\0';
                     } else {
                         *last = '\0';
@@ -1535,7 +1817,7 @@ bool DCM_list(struct UI_Contral * UC_P, const char *obj_dir_path)
         if (btn_inf == (DBI_P)-1) { closedir(dq); return false; }
         btn_inf->UC_P = UC_P;
 
-        // 真实路径（/xxx/xxx.jpg），显示时我们再拼 "S:%s"
+    
         if (obj_dir_path[strlen(obj_dir_path)-1] == '/')
             snprintf(btn_inf->dir_name, sizeof(btn_inf->dir_name), "%s%s", obj_dir_path, eq->d_name);
         else
@@ -1571,7 +1853,6 @@ bool DCM_list(struct UI_Contral * UC_P, const char *obj_dir_path)
     return true;
 }
 
-
 void Dir_Btn_Task(lv_event_t *e )
 {
     DBI_P btn_inf =(DBI_P)e->user_data;
@@ -1592,9 +1873,9 @@ void Dir_Btn_Task(lv_event_t *e )
     lv_obj_clean(btn_inf->UC_P->Main_page->main_list);
     lv_obj_clean(btn_inf->UC_P->Main_page->file_ui);
 
-    // // 正确的参数顺序：先 UC_P，后路径
+    //先 UC_P，后路径
     // DCM_list(UC_P, new_dir_name);
-    // 记录为“当前目录”（释放 Main_page 之后也不会丢）
+    // 记录为“当前目录”
     snprintf(UC_P->cur_dir, sizeof(UC_P->cur_dir), "%s", new_dir_name);
 
     // 重新加载左右两栏
@@ -1724,7 +2005,6 @@ bool  Head_Add_Node(DBI_P head_node,DBI_P new_node)
 
     return true;
 }
-
 bool  Destory_Dir_Btn_List(DBI_P head_node)
 {
     if(head_node == (DBI_P)NULL)
@@ -1767,7 +2047,6 @@ void Start_page_set_folder(struct UI_Contral *UC_P, const char *dir)
         }
     }
 }
-
 //游戏的创建
 bool Game_Show(struct UI_Contral * UC_P)
 {
@@ -1792,53 +2071,6 @@ bool Game_Show(struct UI_Contral * UC_P)
 
 }
 //——————————————————————————————————————————————————————————————————————————————————————
-
-// //游戏游玩界面进入
-// void Enter_Game_page(struct UI_Contral * UC_P)
-// {
-//     UC_P->Game_page=Game_page(UC_P);
-//     if(!UC_P->Game_page) return;
-//     lv_scr_load_anim(UC_P->Game_page->Game_ui,LV_SCR_LOAD_ANIM_FADE_ON,500,0,true);
-//     free(UC_P->Main_page);
-//     UC_P->Main_page=NULL;
-//     return ;
-// }
-//——————————————————————————————————————————————————————————————————————————————————————
-
-// //游戏游玩界面创建
-// GP_P Game_page(struct UI_Contral * UC_P)
-// {
-//     if(!UC_P->Game_page)
-//     {
-//         UC_P->Game_page = malloc(sizeof(struct Game_page));
-//         if(!UC_P->Game_page)
-//         { 
-//             perror("malloc game_page "); 
-//             return NULL; 
-//         }
-//         memset(UC_P->Game_page, 0, sizeof(struct Game_page));
-//     }
-
-//     UC_P->Game_page->Game_ui=lv_obj_create(NULL);
-//     // UC_P->Game_page->backgound=lv_img_create(UC_P->Game_page->Game_ui);
-//     // lv_img_set_src(UC_P->Game_page->backgound,"S:/2.jpg");
-
-//     UC_P->Game_page->back_btn=lv_btn_create(UC_P->Game_page->Game_ui);
-//     lv_obj_set_size(UC_P->Game_page->back_btn,70,30);
-//     lv_obj_set_pos(UC_P->Game_page->back_btn,720,10);
-//     lv_obj_add_event_cb(UC_P->Game_page->back_btn, Return_page, LV_EVENT_SHORT_CLICKED, UC_P);
-
-//     //退出文字
-//     UC_P->Game_page->back_lab=lv_label_create(UC_P->Game_page->back_btn);
-//     lv_label_set_recolor(UC_P->Game_page->back_lab,1);
-//     lv_obj_center(UC_P->Game_page->back_lab);
-//     lv_label_set_text(UC_P->Game_page->back_lab,"#ff0000 E##fffb00 X##00ecf0 I##d626e7 T");
-
-//     return UC_P->Game_page;
-
-// }
-// //——————————————————————————————————————————————————————————————————————————————————————
-
 // 进入小游戏大厅（事件回调）
 void Enter_Game_page(lv_event_t * e)
 {
@@ -1964,8 +2196,6 @@ GP_P Game_page(struct UI_Contral * UC_P)
 
     return gp;
 }
-
-
 //返回主界面
 // 新增：切回后再释放 Game_page（在 LV_EVENT_SCREEN_LOADED 上触发）
 static void free_game_after_loaded(lv_event_t *e)
@@ -2004,9 +2234,6 @@ void Return_page(lv_event_t * e)
     lv_obj_add_event_cb(UC_P->Using_page->User_ui, free_game_after_loaded, 
                         LV_EVENT_SCREEN_LOADED, UC_P);
 }
-
-
-
 //——————
 void emergency_enter(lv_event_t * e)
 {
@@ -2021,6 +2248,7 @@ void emergency_enter(lv_event_t * e)
     //if(UC_P->Using_page){ free(UC_P->Using_page); UC_P->Using_page=NULL; }
     return;
 }
+
 static void emergency_return_to_using_cb(lv_event_t *e)
 {
     struct UI_Contral *UC = (struct UI_Contral *)lv_event_get_user_data(e);
@@ -2034,7 +2262,6 @@ static void emergency_return_to_using_cb(lv_event_t *e)
         lv_scr_load_anim(UC->Start_page->Start_ui, LV_SCR_LOAD_ANIM_FADE_ON, 400, 0, true);
     }
 }
-
 
 EM_P EMERGENCY_page(struct UI_Contral * UC_P)
 {
@@ -2064,8 +2291,6 @@ EM_P EMERGENCY_page(struct UI_Contral * UC_P)
     return UC_P->emergency_page;
 }
 
-
-
 static void emergency_big_btn_cb(lv_event_t *e)
 {
     struct UI_Contral *UC = (struct UI_Contral *)lv_event_get_user_data(e);
@@ -2094,11 +2319,6 @@ static void emergency_big_btn_cb(lv_event_t *e)
     lv_obj_add_event_cb(ret, emergency_return_to_using_cb, LV_EVENT_CLICKED, UC);
 }
 
-
-
-
-
-
 //————————————————————————————————————————————————————————————————————————————————
 
 // 适配 LVGL 事件的回调：把 lv_event_t* 转给 Game_Show(UC_P)
@@ -2112,7 +2332,6 @@ static void Game_Show_cb(lv_event_t * e)
     struct UI_Contral * UC_P = (struct UI_Contral *)lv_event_get_user_data(e);
     if(UC_P == NULL) return;
     // Enter_Game_page(UC_P);
-    // 调用你原本的业务函数，不改它的签名
     Game_Show(UC_P);
 }
 //——————————————————————————————————————————————————————————————————————————————————————
@@ -2124,43 +2343,31 @@ static void game_2048_btn_event_handler(lv_event_t * e)
     if(lv_event_get_code(e) != LV_EVENT_SHORT_CLICKED && lv_event_get_code(e) != LV_EVENT_CLICKED) return;
     struct UI_Contral * UC_P = (struct UI_Contral *)lv_event_get_user_data(e);
     if(!UC_P) return;
-    if (UC_P->Game_page && UC_P->Game_page->in_game) return;  // ★正在游戏就忽略
+    if (UC_P->Game_page && UC_P->Game_page->in_game) return;  // 正在游戏就忽略
 
-    // ❶ 这里原来是 Enter_Game_page(UC_P); —— 错误
-    Enter_Game_page(e);  // ✅ 传入事件，函数内部才能用 lv_event_get_user_data(e)
+    Enter_Game_page(e);  // 传入事件，函数内部才能用 lv_event_get_user_data(e)
 
     lv_timer_t * t = lv_timer_create(start_2048_cb, 10, UC_P);
     lv_timer_set_repeat_count(t, 1);
 }
 
 //——————————————————————————————————————————————————————————————————————————————————————
-
-/*用延迟等待 Game_ui 之后再创建 2048 */
-// static void start_2048_cb(lv_timer_t * timer)
-// {
-//     struct UI_Contral * UC_P = (struct UI_Contral *)timer->user_data;
-//     if(!UC_P || !UC_P->Game_page || !UC_P->Game_page->Game_ui) { lv_timer_del(timer); return; }
-//     lv_100ask_2048_simple_test();
-//     lv_timer_del(timer);
-// }
-//—————————————————————————————————————————————————————————————————————————————————————
-
 static void start_2048_cb(lv_timer_t * timer)
 {
     struct UI_Contral * UC_P = (struct UI_Contral *)timer->user_data;
     if(!UC_P || !UC_P->Game_page || !UC_P->Game_page->Game_ui) { lv_timer_del(timer); return; }
 
-    // ★隐藏大厅，防止还能点
+    // 隐藏大厅
     if (UC_P->Game_page->menu_wrap && lv_obj_is_valid(UC_P->Game_page->menu_wrap))
         lv_obj_add_flag(UC_P->Game_page->menu_wrap, LV_OBJ_FLAG_HIDDEN);
     UC_P->Game_page->in_game = true;
 
-    lv_100ask_2048_simple_test();   // 会在 lv_scr_act()（=Game_ui）上创建控件
+    lv_100ask_2048_simple_test(); 
     lv_timer_del(timer);
 }
 
 //创建函数调用——清除主界面（释放空间，来保证不怎么卡），转到记忆游戏
-// 修复二：记忆游戏按钮
+// 记忆游戏按钮
 static void game_memory_btn_event_handler(lv_event_t * e)
 {
     if(lv_event_get_code(e) != LV_EVENT_SHORT_CLICKED && lv_event_get_code(e) != LV_EVENT_CLICKED) return;
@@ -2174,16 +2381,14 @@ static void game_memory_btn_event_handler(lv_event_t * e)
     lv_timer_t * t = lv_timer_create(start_memory_cb, 10, UC_P);
     lv_timer_set_repeat_count(t, 1);
 }
-
 //——————————————————————————————————————————————————————————————————————————————————————
-
 /*用延迟等待 Game_ui 之后再创建 记忆游戏 */
 static void start_memory_cb(lv_timer_t * timer)
 {
     struct UI_Contral * UC_P = (struct UI_Contral *)timer->user_data;
     if(!UC_P || !UC_P->Game_page || !UC_P->Game_page->Game_ui) { lv_timer_del(timer); return; }
 
-    // ★隐藏大厅，防止还能点
+    // 隐藏大厅，防止还能点
     if (UC_P->Game_page->menu_wrap && lv_obj_is_valid(UC_P->Game_page->menu_wrap))
         lv_obj_add_flag(UC_P->Game_page->menu_wrap, LV_OBJ_FLAG_HIDDEN);
     UC_P->Game_page->in_game = true;
